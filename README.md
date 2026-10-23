@@ -43,6 +43,10 @@ On Linux, Podman needs root privileges or rootless access to host port 443.
 Caddy obtains and renews certificates using [TLS-ALPN-01](https://caddyserver.com/docs/automatic-https#tls-alpn-challenge)
 on TCP 443. HTTP redirects and the HTTP certificate challenge are disabled; port 80 is unused.
 
+MTProxy uses `--nat-info` for the container bridge. Its internal address is detected at
+startup; the public IPv4 defaults to the DNS address of `DOMAIN`. Set `MTPROXY_PUBLIC_IP`
+in `.env` if outbound traffic uses a different public IPv4.
+
 `init.sh` fetches the original 2048 into `site/`, pins a concrete upstream relay commit,
 and writes it to `.env`. The one-shot `secrets-init` service generates (only once) a random
 client proxy secret and a persistent private 32-byte token signing key in the named

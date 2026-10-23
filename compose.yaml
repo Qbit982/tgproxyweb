@@ -79,6 +79,8 @@ services:
       mtproxy-init:
         condition: service_completed_successfully
     environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      MTPROXY_PUBLIC_IP: ${MTPROXY_PUBLIC_IP:-}
       MTPROXY_WORKERS: ${MTPROXY_WORKERS:-1}
       MTPROXY_MAX_CONNECTIONS: ${MTPROXY_MAX_CONNECTIONS:-4096}
     volumes:
