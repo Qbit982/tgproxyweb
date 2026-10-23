@@ -1,0 +1,39 @@
+{
+    email {$ACME_EMAIL}
+    admin off
+    auto_https disable_redirects
+    servers {
+        protocols h1 h2
+        timeouts {
+            read_header 10s
+            read_body 60s
+        }
+    }
+}
+
+{$DOMAIN} {
+    tls {
+        issuer acme {
+            disable_http_challenge
+        }
+    }
+
+    # Same upstream for real site, uncredentialed probes and the WEB carrier.
+    encode zstd gzip
+    header {
+        -Via
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+    reverse_proxy 127.0.0.1:8080 {
+        transport http {
+            response_header_timeout 40s
+        }
+    }
+    handle_errors {
+        header {
+            Cache-Control "no-store"
+            Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        }
+        respond "{http.error.status_code} {http.error.status_text}" {http.error.status_code}
+    }
+}

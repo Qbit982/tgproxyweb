@@ -1,0 +1,130 @@
+name: tproxy-2048
+services:
+  # Public entry point. Only TCP 443 is published.
+  caddy:
+    image: docker.io/library/caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "443:443/tcp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Provision one persistent signing key and isolated copies of the proxy secret.
+  # Re-running does not rotate existing keys.
+  secrets-init:
+    image: docker.io/library/busybox:1.37.0
+    restart: "no"
+    command: ["sh", "/scripts/secrets.sh"]
+    user: "0:0"
+    volumes:
+      - state:/state:z
+      - ./scripts/secrets.sh:/scripts/secrets.sh:ro,z
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: ["no-new-privileges:true"]
+
+  # Official Telegram routing files; only backend consumes them.
+  mtproxy-init:
+    image: docker.io/curlimages/curl:8.16.0
+    user: "0:0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 022
+        curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 -o /routes/proxy-secret.tmp https://core.telegram.org/getProxySecret
+        curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 -o /routes/proxy-multi.conf.tmp https://core.telegram.org/getProxyConfig
+        test "$$(wc -c < /routes/proxy-secret.tmp)" -eq 128
+        test "$$(wc -c < /routes/proxy-multi.conf.tmp)" -ge 100
+        grep -q '^default ' /routes/proxy-multi.conf.tmp
+        grep -q '^proxy_for ' /routes/proxy-multi.conf.tmp
+        mv /routes/proxy-secret.tmp /routes/proxy-secret
+        mv /routes/proxy-multi.conf.tmp /routes/proxy-multi.conf
+        chmod 0644 /routes/proxy-secret /routes/proxy-multi.conf
+    volumes:
+      - routes:/routes:z
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  mtproxy:
+    build:
+      context: ./mtproxy
+      args:
+        MTPROXY_COMMIT: f36d8af769ffaeac36978d38c2c0f6d1104c2137
+        MTPROXY_SHA256: 919795c416b870670841a21d1930ad97a24c7b84b9eb8c6f9e3de32f2fdf4655
+    restart: unless-stopped
+    network_mode: "service:caddy"
+    depends_on:
+      caddy:
+        condition: service_started
+      secrets-init:
+        condition: service_completed_successfully
+      mtproxy-init:
+        condition: service_completed_successfully
+    environment:
+      MTPROXY_WORKERS: ${MTPROXY_WORKERS:-1}
+      MTPROXY_MAX_CONNECTIONS: ${MTPROXY_MAX_CONNECTIONS:-4096}
+    volumes:
+      - state:/state:ro,z
+      - routes:/routes:ro,z
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  relay:
+    build:
+      context: ./relay
+      args:
+        TPROXY_COMMIT: ${TPROXY_COMMIT:?Run ./scripts/init.sh first}
+    restart: unless-stopped
+    network_mode: "service:caddy"
+    depends_on:
+      caddy:
+        condition: service_started
+      secrets-init:
+        condition: service_completed_successfully
+      mtproxy:
+        condition: service_started
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    volumes:
+      - state:/state:ro,z
+      - ./site:/srv/tproxy-site:ro,z
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/readyz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  caddy_data:
+  caddy_config:
+  routes:
+  state:

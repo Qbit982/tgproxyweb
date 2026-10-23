@@ -1,0 +1,5 @@
+/.env
+/site/*
+!/site/.gitkeep
+__pycache__/
+*.log
