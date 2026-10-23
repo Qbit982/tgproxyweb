@@ -2,6 +2,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
+umask 022
 
 if ! command -v git >/dev/null 2>&1; then
     echo 'git is required' >&2
@@ -26,4 +27,8 @@ cat > site/404.html <<'EOF'
 EOF
 
 git -C "$source_dir" rev-parse HEAD > site-revision.txt
+
+find site -type d -exec chmod 0755 {} +
+find site -type f -exec chmod 0644 {} +
+
 printf 'Installed original 2048 into ./site (revision in site-revision.txt)\n'
